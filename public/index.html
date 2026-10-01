@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Draw Me Processor</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #0c0d11;
+      color: #f5f7ff;
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(760px, calc(100% - 48px)); }
+    h1 { font-size: clamp(2rem, 7vw, 3.4rem); margin: 0 0 .25em; }
+    p { color: #b8bfd3; }
+    code { color: #72d4ff; }
+    pre {
+      overflow-x: auto;
+      padding: 18px;
+      border: 1px solid #292d3a;
+      border-radius: 14px;
+      background: #171923;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Draw Me Processor</h1>
+    <p>Online. Send a public raster image URL to <code>/api/prepare</code>.</p>
+    <pre>POST /api/prepare
+Content-Type: application/json
+
+{
+  "url": "https://example.com/image.png",
+  "width": 64,
+  "height": 64,
+  "colors": 16,
+  "skipWhite": true
+}</pre>
+  </main>
+</body>
+</html>
