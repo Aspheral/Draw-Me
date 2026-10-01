@@ -1,5 +1,5 @@
-import { fetchImageFromPublicUrl } from "../lib/fetch-image";
-import { processImage } from "../lib/process-image";
+import { fetchImageFromPublicUrl } from "../lib/fetch-image.js";
+import { processImage } from "../lib/process-image.js";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
