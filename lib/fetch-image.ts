@@ -1,4 +1,4 @@
-import { assertPublicHttpUrl } from "./url-safety";
+import { assertPublicHttpUrl } from "./url-safety.js";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
