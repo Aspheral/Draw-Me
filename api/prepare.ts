@@ -4,7 +4,7 @@ import { processImage } from "../lib/process-image";
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, X-Draw-Me-Key",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 function sendJson(res: any, data: unknown, status = 200) {
@@ -21,6 +21,37 @@ function numberOr(value: unknown, fallback: number): number {
     : fallback;
 }
 
+function one(value: unknown): unknown {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function numberQuery(value: unknown): number | undefined {
+  const raw = one(value);
+
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function bodyFromQuery(query: Record<string, unknown>): Record<string, unknown> {
+  const skipWhiteRaw = one(query.skipWhite);
+
+  return {
+    url: one(query.url),
+    width: numberQuery(query.width),
+    height: numberQuery(query.height),
+    colors: numberQuery(query.colors),
+    whiteThreshold: numberQuery(query.whiteThreshold),
+    skipWhite:
+      typeof skipWhiteRaw === "string"
+        ? skipWhiteRaw.toLowerCase() !== "false"
+        : true,
+  };
+}
+
 export default async function handler(req: any, res: any) {
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(key, value);
@@ -30,7 +61,27 @@ export default async function handler(req: any, res: any) {
     return res.status(204).end();
   }
 
-  if (req.method !== "POST") {
+  let body: Record<string, unknown>;
+
+  if (req.method === "GET") {
+    body = bodyFromQuery(req.query ?? {});
+  } else if (req.method === "POST") {
+    try {
+      if (typeof req.body === "string") {
+        body = JSON.parse(req.body) as Record<string, unknown>;
+      } else if (req.body && typeof req.body === "object") {
+        body = req.body as Record<string, unknown>;
+      } else {
+        throw new Error("Missing JSON body.");
+      }
+    } catch {
+      return sendJson(
+        res,
+        { ok: false, error: "Request body must be valid JSON." },
+        400,
+      );
+    }
+  } else {
     return sendJson(res, { ok: false, error: "Method not allowed." }, 405);
   }
 
@@ -41,24 +92,6 @@ export default async function handler(req: any, res: any) {
     req.headers["x-draw-me-key"] !== configuredKey
   ) {
     return sendJson(res, { ok: false, error: "Unauthorized." }, 401);
-  }
-
-  let body: Record<string, unknown>;
-
-  try {
-    if (typeof req.body === "string") {
-      body = JSON.parse(req.body) as Record<string, unknown>;
-    } else if (req.body && typeof req.body === "object") {
-      body = req.body as Record<string, unknown>;
-    } else {
-      throw new Error("Missing JSON body.");
-    }
-  } catch {
-    return sendJson(
-      res,
-      { ok: false, error: "Request body must be valid JSON." },
-      400,
-    );
   }
 
   if (
