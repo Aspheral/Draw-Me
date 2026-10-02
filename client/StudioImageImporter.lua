@@ -1,7 +1,7 @@
 -- Draw Me Studio Image Importer
 -- For a Roblox Studio remake/owned copy of Draw Me.
 -- Imports an external image URL through the Draw-Me Vercel prepare endpoint
--- and writes the processed pixels directly into the replica's EditableImage canvas.
+-- and writes the processed pixels into the actual live DrawingCanvas3 layer EditableImage.
 
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -19,45 +19,71 @@ local CANVAS_SIZE = 512
 local DEFAULT_COLORS = 24
 local WHITE_THRESHOLD = 245
 
-local function findRenderFrame()
-	local direct = playerGui:FindFirstChild("ScreenGui")
-	if direct then
-		local drawingCanvasGuis = direct:FindFirstChild("DrawingCanvasGuis")
-		local canvasGui = drawingCanvasGuis and drawingCanvasGuis:FindFirstChild("CanvasGui")
-		local canvasFrame = canvasGui and canvasGui:FindFirstChild("CanvasFrame")
-		local canvas = canvasFrame and canvasFrame:FindFirstChild("Canvas")
-		local folder = canvas and canvas:FindFirstChild("RenderImageFolder")
-		local frame = folder and folder:FindFirstChild("RenderFrame")
-		if frame then
-			return frame
-		end
+local function getDrawMeCanvas()
+	local canvas = nil
+
+	if type(shared) == "table" then
+		canvas = rawget(shared, "DrawMeCanvas")
 	end
 
-	for _, obj in ipairs(playerGui:GetDescendants()) do
-		if obj.Name == "RenderFrame" and obj:IsA("Frame") then
-			local final = obj:FindFirstChild("RenderImageLabel")
-			local staging = obj:FindFirstChild("RenderEditStagingImageLabel")
-			local bottom = obj:FindFirstChild("RenderEditBottomImageLabel")
-			if final and staging and bottom then
-				return obj
+	if canvas == nil and type(_G) == "table" then
+		canvas = rawget(_G, "DrawMeCanvas")
+	end
+
+	if type(canvas) == "function" then
+		canvas = canvas()
+	end
+
+	assert(
+		type(canvas) == "table",
+		"Draw Me's live Canvas object is not exposed. "
+			.. "In the copied Draw Me controller, immediately after it creates/receives "
+			.. "the live Canvas object, add: shared.DrawMeCanvas = Canvas"
+	)
+
+	return canvas
+end
+
+local DRAW_ME_CANVAS = getDrawMeCanvas()
+
+local function getSingleLayerEditableImage(canvas)
+	local layers = canvas.Layers
+	assert(type(layers) == "table", "Canvas.Layers is missing.")
+
+	local list = layers.List
+	assert(type(list) == "table", "Canvas.Layers.List is missing.")
+
+	local foundLayer = nil
+	local foundImage = nil
+	local count = 0
+
+	for _, layer in pairs(list) do
+		if type(layer) == "table" then
+			local internal = layer.Internal
+			local image = type(internal) == "table" and internal.EditableImage or nil
+
+			if image ~= nil then
+				local ok, isEditable = pcall(function()
+					return image:IsA("EditableImage")
+				end)
+
+				if ok and isEditable then
+					count += 1
+					foundLayer = layer
+					foundImage = image
+				end
 			end
 		end
 	end
 
-	error("Could not locate Draw Me RenderFrame.")
-end
+	assert(count > 0, "No layer Internal.EditableImage was found.")
+	assert(
+		count == 1,
+		"Studio importer is configured for exactly one Draw Me layer, but found "
+			.. tostring(count) .. "."
+	)
 
-local renderFrame = findRenderFrame()
-local FINAL = assert(renderFrame:FindFirstChild("RenderImageLabel"), "RenderImageLabel missing")
-local TOP = renderFrame:FindFirstChild("RenderEditTopImageLabel")
-local STAGING = assert(renderFrame:FindFirstChild("RenderEditStagingImageLabel"), "RenderEditStagingImageLabel missing")
-local BOTTOM = assert(renderFrame:FindFirstChild("RenderEditBottomImageLabel"), "RenderEditBottomImageLabel missing")
-
-assert(FINAL:IsA("ImageLabel"), "RenderImageLabel must be an ImageLabel")
-assert(STAGING:IsA("ImageLabel"), "RenderEditStagingImageLabel must be an ImageLabel")
-assert(BOTTOM:IsA("ImageLabel"), "RenderEditBottomImageLabel must be an ImageLabel")
-if TOP then
-	assert(TOP:IsA("ImageLabel"), "RenderEditTopImageLabel must be an ImageLabel")
+	return foundLayer, foundImage
 end
 
 local function getUrl(url)
@@ -157,85 +183,49 @@ local function buildCanvasBuffer(drawing)
 	return pixels
 end
 
-local liveImages = {}
-
-local function destroyImages(images)
-	for _, image in ipairs(images) do
-		pcall(function()
-			image:Destroy()
-		end)
-	end
-end
-
-local function makeEditableImage(pixelBuffer)
-	local image = AssetService:CreateEditableImage({
-		Size = Vector2.new(CANVAS_SIZE, CANVAS_SIZE),
-	})
-
-	assert(
-		image,
-		"CreateEditableImage returned nil. In published experiences, enable Mesh / Image APIs."
-	)
-
-	image:WritePixelsBuffer(
-		Vector2.zero,
-		Vector2.new(CANVAS_SIZE, CANVAS_SIZE),
-		pixelBuffer
-	)
-
-	return image
-end
-
-local function blankTransparentImage()
-	local blank = buffer.create(CANVAS_SIZE * CANVAS_SIZE * 4)
-	return makeEditableImage(blank)
-end
-
 local function applyDrawing(drawing)
 	local pixels = buildCanvasBuffer(drawing)
 
-	-- Build the replacement surfaces first so a failed import never destroys
-	-- the canvas from the previous successful import.
-	local committed = makeEditableImage(pixels)
-	local blank = blankTransparentImage()
+	local _, layerImage =
+		getSingleLayerEditableImage(DRAW_ME_CANVAS)
 
-	local committedContent = Content.fromObject(committed)
-	local blankContent = Content.fromObject(blank)
+	local size = layerImage.Size
 
-	-- One-layer idle state reconstructed from the replica's render pipeline:
-	-- FINAL == BOTTOM, STAGING/TOP transparent.
-	FINAL.ImageContent = committedContent
-	BOTTOM.ImageContent = committedContent
-	STAGING.ImageContent = blankContent
+	assert(
+		math.floor(size.X) == CANVAS_SIZE
+			and math.floor(size.Y) == CANVAS_SIZE,
+		"Draw Me layer image is "
+			.. tostring(size)
+			.. "; importer currently expects 512x512."
+	)
 
-	if TOP then
-		TOP.ImageContent = blankContent
-	end
+	-- This is the actual EditableImage owned by Draw Me's live one-layer
+	-- canvas model. We mutate it in place instead of replacing ImageLabels.
+	layerImage:WritePixelsBuffer(
+		Vector2.zero,
+		size,
+		pixels
+	)
 
-	FINAL.Visible = true
-	BOTTOM.Visible = false
-	STAGING.Visible = false
-	if TOP then
-		TOP.Visible = false
-	end
+	-- Ask the real canvas implementation to rebuild its committed render
+	-- surfaces from the layer state we just changed.
+	local update = DRAW_ME_CANVAS.UpdateRenderImage
 
-	FINAL.ImageTransparency = 0
-	FINAL.ImageColor3 = Color3.new(1, 1, 1)
-	BOTTOM.ImageTransparency = 0
-	BOTTOM.ImageColor3 = Color3.new(1, 1, 1)
-	STAGING.ImageTransparency = 0
-	STAGING.ImageColor3 = Color3.new(1, 1, 1)
-	if TOP then
-		TOP.ImageTransparency = 0
-		TOP.ImageColor3 = Color3.new(1, 1, 1)
-	end
+	assert(
+		type(update) == "function",
+		"Canvas.UpdateRenderImage is missing."
+	)
 
-	local previousImages = liveImages
-	liveImages = { committed, blank }
+	local ok, err = pcall(
+		update,
+		DRAW_ME_CANVAS
+	)
 
-	-- The labels now hold the new Content references, so old script-created
-	-- surfaces can be reclaimed safely.
-	destroyImages(previousImages)
+	assert(
+		ok,
+		"Canvas:UpdateRenderImage() failed: "
+			.. tostring(err)
+	)
 end
 
 --============================================================
@@ -343,7 +333,7 @@ info.Position = UDim2.fromOffset(14, 150)
 info.Size = UDim2.new(1, -28, 0, 24)
 info.BackgroundTransparency = 1
 info.Font = Enum.Font.Code
-info.Text = "512×512 final surface • one layer • Vercel /api/prepare"
+info.Text = "512×512 live Draw Me layer • one layer • Vercel /api/prepare"
 info.TextSize = 11
 info.TextColor3 = Color3.fromRGB(150, 158, 178)
 info.TextXAlignment = Enum.TextXAlignment.Left
