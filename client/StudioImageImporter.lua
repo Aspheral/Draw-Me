@@ -159,16 +159,15 @@ end
 
 local liveImages = {}
 
-local function destroyOwnedImages()
-	for _, image in ipairs(liveImages) do
+local function destroyImages(images)
+	for _, image in ipairs(images) do
 		pcall(function()
 			image:Destroy()
 		end)
 	end
-	table.clear(liveImages)
 end
 
-local function newEditableImage(pixelBuffer)
+local function makeEditableImage(pixelBuffer)
 	local image = AssetService:CreateEditableImage({
 		Size = Vector2.new(CANVAS_SIZE, CANVAS_SIZE),
 	})
@@ -184,26 +183,26 @@ local function newEditableImage(pixelBuffer)
 		pixelBuffer
 	)
 
-	table.insert(liveImages, image)
 	return image
 end
 
 local function blankTransparentImage()
 	local blank = buffer.create(CANVAS_SIZE * CANVAS_SIZE * 4)
-	return newEditableImage(blank)
+	return makeEditableImage(blank)
 end
 
 local function applyDrawing(drawing)
 	local pixels = buildCanvasBuffer(drawing)
 
-	-- Create new surfaces before dropping references to the previous import.
-	local committed = newEditableImage(pixels)
+	-- Build the replacement surfaces first so a failed import never destroys
+	-- the canvas from the previous successful import.
+	local committed = makeEditableImage(pixels)
 	local blank = blankTransparentImage()
 
 	local committedContent = Content.fromObject(committed)
 	local blankContent = Content.fromObject(blank)
 
-	-- One-layer idle state reconstructed from our renderer experiments:
+	-- One-layer idle state reconstructed from the replica's render pipeline:
 	-- FINAL == BOTTOM, STAGING/TOP transparent.
 	FINAL.ImageContent = committedContent
 	BOTTOM.ImageContent = committedContent
@@ -230,6 +229,13 @@ local function applyDrawing(drawing)
 		TOP.ImageTransparency = 0
 		TOP.ImageColor3 = Color3.new(1, 1, 1)
 	end
+
+	local previousImages = liveImages
+	liveImages = { committed, blank }
+
+	-- The labels now hold the new Content references, so old script-created
+	-- surfaces can be reclaimed safely.
+	destroyImages(previousImages)
 end
 
 --============================================================
